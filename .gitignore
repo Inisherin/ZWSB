@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Python virtual envs
+.venv/
+venv/
+env/
+
+# Model outputs and caches
+output/
+processed_data/
+
+# Raw medical video data (privacy + large files)
+2025年新谵妄数据/

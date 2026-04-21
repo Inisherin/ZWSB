@@ -1,0 +1,14 @@
+# 推荐使用独立conda环境安装（避免与base环境的cv2冲突）:
+#   conda create -n delirium python=3.11 -y
+#   conda activate delirium
+#   pip install -r requirements.txt
+
+torch>=2.0.0
+torchvision>=0.15.0
+mediapipe>=0.10.0
+opencv-python>=4.10.0
+scikit-learn>=1.3.0
+numpy>=1.24.0,<2.0
+pandas>=2.0.0
+tqdm>=4.65.0
+matplotlib>=3.7.0

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(brew install:*)",
+      "Bash(python3:*)",
+      "Bash(conda run:*)",
+      "Bash(conda list:*)",
+      "Bash(pip install:*)",
+      "Bash(~/anaconda3/bin/python3:*)",
+      "Bash(~/anaconda3/bin/pip install:*)",
+      "Bash(~/anaconda3/bin/python model.py)",
+      "Bash(~/anaconda3/bin/python preprocess.py --debug)",
+      "Bash(~/anaconda3/bin/pip uninstall:*)",
+      "Bash(~/anaconda3/bin/python:*)",
+      "Bash(~/anaconda3/bin/conda list:*)",
+      "Bash(~/anaconda3/bin/conda install:*)",
+      "Bash(~/anaconda3/bin/conda create:*)",
+      "Bash(~/anaconda3/envs/delirium/bin/pip install:*)",
+      "Bash(~/anaconda3/envs/delirium/bin/python:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(wait)",
+      "Bash(xargs -I{} ls \"/Users/tangyifan/Desktop/谵妄识别/processed_data/lucid/{}\")",
+      "Bash(~/anaconda3/envs/delirium/bin/python *)",
+      "Bash(PYTHONFAULTHANDLER=1 ~/anaconda3/envs/delirium/bin/python -u train.py --debug)",
+      "Bash(NUMBA_DISABLE_JIT=1 ~/anaconda3/envs/delirium/bin/python -u train.py --debug)",
+      "Bash(OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 ~/anaconda3/envs/delirium/bin/python -u train.py --debug)",
+      "Bash(OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 ~/anaconda3/envs/delirium/bin/python train.py --debug)",
+      "Bash('~/anaconda3/envs/delirium/bin/python' -c ' *)",
+      "Bash(curl -s --max-time 5 https://huggingface.co)",
+      "Bash(curl -s --max-time 5 https://cdn-lfs.huggingface.co)",
+      "Bash(~/anaconda3/envs/delirium/bin/pip show *)",
+      "Bash(curl -s --connect-timeout 5 https://huggingface.co)",
+      "Bash(python *)"
+    ]
+  }
+}
