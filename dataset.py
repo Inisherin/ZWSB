@@ -55,6 +55,7 @@ class DeliriumDataset(Dataset):
         clip_mask = []
         all_audio = []
         semantic_scores = []
+        semantic_confidences = []
         audio_mask = []
 
         # clip_dirs and audio_dirs are aligned (same length, "" means no face detected)
@@ -101,6 +102,7 @@ class DeliriumDataset(Dataset):
                 audio_mask.append(0)
 
             semantic_scores.append(float(asr_data.get("semantic_score", 0.5)))
+            semantic_confidences.append(float(asr_data.get("semantic_confidence", 0.0)))
 
         # 填充到 max_clips（当视频总片段数不足时）
         C, H, W = 3, config.FACE_SIZE, config.FACE_SIZE
@@ -110,6 +112,7 @@ class DeliriumDataset(Dataset):
             clip_mask.append(0)
             all_audio.append(torch.zeros(self.max_audio_frames, self.n_mfcc_total))
             semantic_scores.append(0.5)
+            semantic_confidences.append(0.0)
             audio_mask.append(0)
 
         clips_tensor = torch.stack(all_clips)
@@ -117,6 +120,7 @@ class DeliriumDataset(Dataset):
         mask_tensor = torch.tensor(clip_mask, dtype=torch.float)
         audio_tensor = torch.stack(all_audio)                           # [max_clips, T_audio, N_MFCC*3]
         semantic_tensor = torch.tensor(semantic_scores, dtype=torch.float).unsqueeze(-1)  # [max_clips, 1]
+        semantic_conf_tensor = torch.tensor(semantic_confidences, dtype=torch.float).unsqueeze(-1)  # [max_clips, 1]
         audio_mask_tensor = torch.tensor(audio_mask, dtype=torch.float)
         label_tensor = torch.tensor(label, dtype=torch.float)
 
@@ -126,6 +130,7 @@ class DeliriumDataset(Dataset):
             "clip_mask": mask_tensor,
             "audio_features": audio_tensor,
             "semantic_scores": semantic_tensor,
+            "semantic_confidences": semantic_conf_tensor,
             "audio_mask": audio_mask_tensor,
             "label": label_tensor,
             "patient_id": record["patient_id"]

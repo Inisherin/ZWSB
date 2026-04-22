@@ -19,13 +19,20 @@ from model import DeliriumNet
 from audio_processor import process_clip_audio
 
 
+def _ckpt_uses_audio(state_dict):
+    return any(k.startswith("audio_stream.") for k in state_dict.keys())
+
+
 def load_model(checkpoint_path, device):
     """加载训练好的模型"""
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     # 恢复训练时的 max_frames 配置（避免 pos_embedding 尺寸不匹配）
     if "max_frames_per_clip" in ckpt:
         config.MAX_FRAMES_PER_CLIP = ckpt["max_frames_per_clip"]
-    model = DeliriumNet(pretrained=False).to(device)
+    ckpt_use_audio = ckpt.get("use_audio")
+    if ckpt_use_audio is None:
+        ckpt_use_audio = _ckpt_uses_audio(ckpt["model_state_dict"])
+    model = DeliriumNet(pretrained=False, use_audio=ckpt_use_audio).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     return model
@@ -177,6 +184,7 @@ def predict(model, patient_dir, device):
     clip_mask = []
     all_audio = []
     all_semantic = []
+    all_semantic_conf = []
     audio_mask = []
     clip_info = []
 
@@ -215,9 +223,14 @@ def predict(model, patient_dir, device):
 
         # 音频处理
         if config.USE_AUDIO:
-            audio_result = process_clip_audio(video_path, clip_index=clip_idx, use_whisper=True)
+            audio_result = process_clip_audio(
+                video_path,
+                clip_index=clip_idx,
+                use_whisper=config.USE_WHISPER and config.USE_AUDIO
+            )
             mfcc = audio_result.get("mfcc")
             sem_score = audio_result.get("semantic_score", 0.5)
+            sem_conf = audio_result.get("semantic_confidence", 0.0)
             if mfcc is not None:
                 mfcc_t = torch.tensor(mfcc, dtype=torch.float32)
                 Ta = mfcc_t.shape[0]
@@ -232,6 +245,7 @@ def predict(model, patient_dir, device):
                 all_audio.append(torch.zeros(config.MAX_AUDIO_FRAMES, n_mfcc_total))
                 audio_mask.append(0)
             all_semantic.append(sem_score)
+            all_semantic_conf.append(sem_conf)
 
     for det in face_detectors:
         det.close()
@@ -248,6 +262,7 @@ def predict(model, patient_dir, device):
         if config.USE_AUDIO:
             all_audio.append(torch.zeros(config.MAX_AUDIO_FRAMES, n_mfcc_total))
             all_semantic.append(0.5)
+            all_semantic_conf.append(0.0)
             audio_mask.append(0)
 
     # 构建batch (batch_size=1)
@@ -255,15 +270,17 @@ def predict(model, patient_dir, device):
     lengths_tensor = torch.tensor([clip_lengths], dtype=torch.long).to(device)
     mask_tensor = torch.tensor([clip_mask], dtype=torch.float).to(device)
 
-    audio_tensor = semantic_tensor = audio_mask_tensor = None
+    audio_tensor = semantic_tensor = semantic_conf_tensor = audio_mask_tensor = None
     if config.USE_AUDIO and all_audio:
         audio_tensor = torch.stack(all_audio).unsqueeze(0).to(device)           # [1, max_clips, T_audio, N_MFCC*3]
         semantic_tensor = torch.tensor(all_semantic, dtype=torch.float).unsqueeze(0).unsqueeze(-1).to(device)  # [1, max_clips, 1]
+        semantic_conf_tensor = torch.tensor(all_semantic_conf, dtype=torch.float).unsqueeze(0).unsqueeze(-1).to(device)  # [1, max_clips, 1]
         audio_mask_tensor = torch.tensor([audio_mask], dtype=torch.float).to(device)
 
     # 推理
     logits = model(clips_tensor, lengths_tensor, mask_tensor,
-                   audio_tensor, semantic_tensor, audio_mask_tensor).squeeze()
+                   audio_tensor, semantic_tensor,
+                   semantic_conf_tensor, audio_mask_tensor).squeeze()
     prob = torch.sigmoid(logits).item()
 
     return {

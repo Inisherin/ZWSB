@@ -31,7 +31,7 @@ FRAME_RATE = 2            # 抽帧率 (fps)
 FACE_SIZE = 112           # 人脸裁剪后尺寸
 MIN_FACE_CONFIDENCE = 0.5 # 人脸检测最低置信度
 MAX_CLIPS = 4             # 每个患者最多片段数
-MAX_FRAMES_PER_CLIP = 80 if not DEBUG_MODE else 20  # 每个片段最大帧数 (2fps * 40s)
+MAX_FRAMES_PER_CLIP = 20  # 每个片段最大帧数（加速全量训练）
 
 # ============ 模型参数 ============
 # 外观流
@@ -57,6 +57,8 @@ SEMANTIC_DIM = 1
 FUSED_DIM_MULTIMODAL = FUSED_DIM + AUDIO_DIM + SEMANTIC_DIM  # 769
 WHISPER_MODEL = "small"
 USE_AUDIO = True
+# 是否启用ASR语义特征（开启后会显著增加预处理耗时）
+USE_WHISPER = True
 
 # ============ 训练参数 ============
 BATCH_SIZE = 8 if torch.cuda.is_available() else 2
@@ -68,6 +70,19 @@ TRAIN_RATIO = 0.70
 VAL_RATIO = 0.15
 TEST_RATIO = 0.15
 RANDOM_SEED = 42
+
+# ============ 正则化参数 ============
+# Label smoothing：防止模型输出极端概率（0.0003/0.9997）
+# 把 0/1 标签软化为 smoothing/2 和 1-smoothing/2
+LABEL_SMOOTHING = 0.1
+# Backbone 冻结：前 N epoch 只训练非 ResNet18 部分，防止快速过拟合
+# 0 表示不冻结；建议 3~8
+FREEZE_BACKBONE_EPOCHS = 5
+# 解冻后对 backbone 使用更低的学习率倍数（0.1 = backbone LR = main LR × 0.1）
+BACKBONE_LR_SCALE = 0.1
+# Mixup 增强：在 batch 内插值样本对，提升泛化
+USE_MIXUP = True
+MIXUP_ALPHA = 0.3         # Beta 分布参数；越大插值越重
 
 # ============ 创建必要目录 ============
 for d in [PROCESSED_DIR, OUTPUT_DIR, CHECKPOINT_DIR, LOG_DIR]:

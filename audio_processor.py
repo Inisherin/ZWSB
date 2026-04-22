@@ -146,6 +146,7 @@ def get_whisper_model(model_size=None):
     """懒加载Whisper模型（全局单例）"""
     if not hasattr(get_whisper_model, '_model') or get_whisper_model._model is None:
         from faster_whisper import WhisperModel
+        import torch
         import ssl
         import os as _os
         # 绕过SSL验证以支持离线/受限网络环境下的模型加载
@@ -153,12 +154,23 @@ def get_whisper_model(model_size=None):
         _os.environ.setdefault("CURL_CA_BUNDLE", "")
         _os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
         model_size = model_size or config.WHISPER_MODEL
-        print(f"  [ASR] 加载 faster-whisper {model_size} 模型...")
-        get_whisper_model._model = WhisperModel(
-            model_size,
-            device="cpu",
-            compute_type="int8"  # CPU上使用int8量化加速
-        )
+        prefer_cuda = torch.cuda.is_available()
+        device = "cuda" if prefer_cuda else "cpu"
+        compute_type = "float16" if prefer_cuda else "int8"
+        print(f"  [ASR] 加载 faster-whisper {model_size} 模型 (device={device})...")
+        try:
+            get_whisper_model._model = WhisperModel(
+                model_size,
+                device=device,
+                compute_type=compute_type
+            )
+        except Exception as e:
+            print(f"  [ASR] {device} 初始化失败，回退CPU: {e}")
+            get_whisper_model._model = WhisperModel(
+                model_size,
+                device="cpu",
+                compute_type="int8"
+            )
     return get_whisper_model._model
 
 

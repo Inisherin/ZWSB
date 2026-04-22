@@ -26,6 +26,16 @@ from dataset import create_dataloaders
 from model import DeliriumNet
 
 
+def _ckpt_uses_audio(state_dict):
+    return any(k.startswith("audio_stream.") for k in state_dict.keys())
+
+
+def _sanitize_tag(tag):
+    if not tag:
+        return ""
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in tag)
+
+
 @torch.no_grad()
 def predict_all(model, loader, device):
     """对所有样本进行预测"""
@@ -41,14 +51,17 @@ def predict_all(model, loader, device):
         labels = batch["label"]
         audio_features = batch.get("audio_features")
         semantic_scores = batch.get("semantic_scores")
+        semantic_confidences = batch.get("semantic_confidences")
         audio_mask = batch.get("audio_mask")
         if audio_features is not None:
             audio_features = audio_features.to(device)
             semantic_scores = semantic_scores.to(device)
+            semantic_confidences = semantic_confidences.to(device)
             audio_mask = audio_mask.to(device)
 
         logits = model(clips, clip_lengths, clip_mask,
-                       audio_features, semantic_scores, audio_mask).squeeze(-1)
+                       audio_features, semantic_scores,
+                       semantic_confidences, audio_mask).squeeze(-1)
         probs = torch.sigmoid(logits).cpu().numpy()
 
         all_preds.extend(probs)
@@ -175,13 +188,17 @@ def plot_prediction_distribution(labels, preds, save_path):
 def main():
     parser = argparse.ArgumentParser(description="谵妄识别模型评估")
     parser.add_argument("--checkpoint", type=str, default=None, help="模型检查点路径")
+    parser.add_argument("--tag", type=str, default="", help="实验标签，用于读取/保存对应结果")
     args = parser.parse_args()
+
+    tag = _sanitize_tag(args.tag)
+    suffix = f"_{tag}" if tag else ""
 
     device = config.DEVICE
     print(f"设备: {device}")
 
     # 加载模型
-    checkpoint_path = args.checkpoint or os.path.join(config.CHECKPOINT_DIR, "best_model.pth")
+    checkpoint_path = args.checkpoint or os.path.join(config.CHECKPOINT_DIR, f"best_model{suffix}.pth")
     if not os.path.isfile(checkpoint_path):
         print(f"错误: 找不到模型检查点 {checkpoint_path}")
         print("请先运行 train.py 训练模型")
@@ -192,7 +209,10 @@ def main():
     # 恢复训练时的 max_frames 配置（避免 pos_embedding 尺寸不匹配）
     if "max_frames_per_clip" in ckpt:
         config.MAX_FRAMES_PER_CLIP = ckpt["max_frames_per_clip"]
-    model = DeliriumNet(pretrained=False).to(device)
+    ckpt_use_audio = ckpt.get("use_audio")
+    if ckpt_use_audio is None:
+        ckpt_use_audio = _ckpt_uses_audio(ckpt["model_state_dict"])
+    model = DeliriumNet(pretrained=False, use_audio=ckpt_use_audio).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     print(f"模型加载成功 (训练至epoch {ckpt['epoch'] + 1}, best AUC={ckpt['best_auc']:.4f}, max_frames={config.MAX_FRAMES_PER_CLIP})")
 
@@ -233,12 +253,13 @@ def main():
     # 保存评估结果
     eval_metrics = compute_metrics(labels, preds, optimal_threshold)
     eval_metrics["optimal_threshold"] = float(optimal_threshold)
+    eval_metrics["tag"] = tag
 
     # 也保存默认阈值的指标
     default_metrics = compute_metrics(labels, preds, 0.5)
     eval_metrics["default_threshold_metrics"] = default_metrics
 
-    eval_path = os.path.join(config.LOG_DIR, "evaluation_results.json")
+    eval_path = os.path.join(config.LOG_DIR, f"evaluation_results{suffix}.json")
     with open(eval_path, "w") as f:
         json.dump(eval_metrics, f, indent=2, default=lambda x: float(x))
     print(f"\n评估结果已保存: {eval_path}")
@@ -249,24 +270,24 @@ def main():
     os.makedirs(vis_dir, exist_ok=True)
 
     try:
-        plot_roc_curve(labels, preds, os.path.join(vis_dir, "roc_curve.png"))
+        plot_roc_curve(labels, preds, os.path.join(vis_dir, f"roc_curve{suffix}.png"))
     except Exception as e:
         print(f"  ROC曲线绘制失败: {e}")
 
     try:
         plot_confusion_matrix(labels, preds, optimal_threshold,
-                              os.path.join(vis_dir, "confusion_matrix.png"))
+                              os.path.join(vis_dir, f"confusion_matrix{suffix}.png"))
     except Exception as e:
         print(f"  混淆矩阵绘制失败: {e}")
 
     try:
         plot_prediction_distribution(labels, preds,
-                                     os.path.join(vis_dir, "prediction_distribution.png"))
+                                     os.path.join(vis_dir, f"prediction_distribution{suffix}.png"))
     except Exception as e:
         print(f"  预测分布图绘制失败: {e}")
 
     # 逐患者结果
-    patient_results_path = os.path.join(config.LOG_DIR, "patient_predictions.csv")
+    patient_results_path = os.path.join(config.LOG_DIR, f"patient_predictions{suffix}.csv")
     with open(patient_results_path, "w") as f:
         f.write("patient_id,true_label,predicted_prob,predicted_label\n")
         for pid, true_l, pred_p in zip(patient_ids, labels, preds):

@@ -241,6 +241,10 @@ class DeliriumNet(nn.Module):
 
         # 多片段融合和分类头
         self.clip_fusion = MultiClipFusion(d_model=clip_emb_dim)
+        self.pre_classifier = nn.Sequential(
+            nn.LayerNorm(clip_emb_dim),
+            nn.Dropout(config.DROPOUT)
+        )
         self.classifier = nn.Sequential(
             nn.Linear(clip_emb_dim, config.HIDDEN_DIM),
             nn.ReLU(inplace=True),
@@ -248,7 +252,9 @@ class DeliriumNet(nn.Module):
             nn.Linear(config.HIDDEN_DIM, config.NUM_CLASSES)
         )
 
-    def forward_single_clip(self, clip_frames, clip_length, audio_frames=None, semantic_score=None):
+    def forward_single_clip(self, clip_frames, clip_length,
+                            audio_frames=None, semantic_score=None,
+                            semantic_confidence=None):
         """
         处理单个视频片段（含可选音频）。
 
@@ -272,6 +278,10 @@ class DeliriumNet(nn.Module):
                 semantic_score = torch.full(
                     (audio_emb.shape[0], 1), 0.5, device=audio_emb.device
                 )
+            # 使用ASR语义置信度抑制噪声：低置信度时回退至中性分数0.5
+            if semantic_confidence is not None:
+                semantic_confidence = semantic_confidence.clamp(0.0, 1.0)
+                semantic_score = semantic_score * semantic_confidence + 0.5 * (1.0 - semantic_confidence)
             clip_emb = torch.cat([visual_emb, audio_emb, semantic_score], dim=-1)  # [B, 769]
         else:
             clip_emb = visual_emb
@@ -279,7 +289,8 @@ class DeliriumNet(nn.Module):
         return clip_emb
 
     def forward(self, clips, clip_lengths, clip_mask,
-                audio_features=None, semantic_scores=None, audio_mask=None):
+                audio_features=None, semantic_scores=None,
+                semantic_confidences=None, audio_mask=None):
         """
         Args:
             clips: [B, num_clips, T, C, H, W]
@@ -297,13 +308,15 @@ class DeliriumNet(nn.Module):
         for i in range(num_clips):
             audio_i = audio_features[:, i] if audio_features is not None else None
             sem_i = semantic_scores[:, i] if semantic_scores is not None else None
+            sem_conf_i = semantic_confidences[:, i] if semantic_confidences is not None else None
             clip_emb = self.forward_single_clip(
-                clips[:, i], clip_lengths[:, i], audio_i, sem_i
+                clips[:, i], clip_lengths[:, i], audio_i, sem_i, sem_conf_i
             )
             clip_embeddings.append(clip_emb)
 
         clip_embeddings = torch.stack(clip_embeddings, dim=1)  # [B, num_clips, clip_emb_dim]
         patient_emb = self.clip_fusion(clip_embeddings, clip_mask)
+        patient_emb = self.pre_classifier(patient_emb)
         logits = self.classifier(patient_emb)
         return logits
 
@@ -313,6 +326,18 @@ def count_parameters(model):
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total, trainable
+
+
+def freeze_backbone(model):
+    """冻结 ResNet18 骨干网络（防止前期快速过拟合）"""
+    for param in model.appearance_stream.features.parameters():
+        param.requires_grad = False
+
+
+def unfreeze_backbone(model):
+    """解冻 ResNet18 骨干网络（训练后期精细调整）"""
+    for param in model.appearance_stream.features.parameters():
+        param.requires_grad = True
 
 
 if __name__ == "__main__":
@@ -327,8 +352,9 @@ if __name__ == "__main__":
     clip_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 1, 1]], dtype=torch.float)
     audio = torch.randn(B, NC, config.MAX_AUDIO_FRAMES, config.N_MFCC * 3)
     sem = torch.rand(B, NC, 1)
+    sem_conf = torch.rand(B, NC, 1)
     audio_mask = clip_mask.clone()
 
-    logits = model(clips, clip_lengths, clip_mask, audio, sem, audio_mask)
+    logits = model(clips, clip_lengths, clip_mask, audio, sem, sem_conf, audio_mask)
     print(f"输出形状: {logits.shape}")  # [2, 1]
     print(f"clip_emb_dim: {model.clip_emb_dim}")

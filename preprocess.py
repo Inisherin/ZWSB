@@ -13,12 +13,16 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 import sys
 import csv
 import argparse
+import warnings
 import cv2
 import numpy as np
 import mediapipe as mp
 from tqdm import tqdm
 import config
 from audio_processor import process_clip_audio, save_audio_features
+
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def create_face_detectors():
@@ -209,17 +213,21 @@ def process_patient(patient_dir, patient_name, label, face_detectors, debug=Fals
                 clip_dirs.append(None)
 
         # --- 音频处理 ---
-        mfcc_path = os.path.join(patient_out_dir, f"clip_{clip_idx}_mfcc.npy")
-        if os.path.isfile(mfcc_path):
+        # 视觉-only模式下跳过音频提取，可显著加速全量预处理。
+        if not config.USE_AUDIO:
             audio_dirs.append(patient_out_dir)
         else:
-            audio_result = process_clip_audio(
-                video_path, clip_index=clip_idx,
-                use_whisper=config.USE_AUDIO and not debug,
-                debug=debug
-            )
-            save_audio_features(audio_result, patient_out_dir, clip_idx)
-            audio_dirs.append(patient_out_dir)
+            mfcc_path = os.path.join(patient_out_dir, f"clip_{clip_idx}_mfcc.npy")
+            if os.path.isfile(mfcc_path):
+                audio_dirs.append(patient_out_dir)
+            else:
+                audio_result = process_clip_audio(
+                    video_path, clip_index=clip_idx,
+                    use_whisper=config.USE_WHISPER and config.USE_AUDIO and not debug,
+                    debug=debug
+                )
+                save_audio_features(audio_result, patient_out_dir, clip_idx)
+                audio_dirs.append(patient_out_dir)
 
     if not any(d for d in clip_dirs if d is not None):
         return None
